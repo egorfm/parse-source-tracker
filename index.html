@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Источники для парсинга</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--ink:#1d2327;--mute:#6b7378;--line:#dcdad4;--ok:#1e7a4c;--run:#9a6700;--err:#b3261e;--accent:#23546b}
+@media (prefers-color-scheme:dark){:root{--bg:#161a1c;--card:#1f2427;--ink:#e6e8e9;--mute:#8d979c;--line:#323a3e;--ok:#5cc58e;--run:#e0b04a;--err:#f2837b;--accent:#7fb6d1}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,"Helvetica Neue",Arial,sans-serif;padding:24px}
+main{max-width:1100px;margin:0 auto}
+h1{font-size:22px;margin:0 0 4px}
+.sub{color:var(--mute);margin:0 0 20px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+input,select,button{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button{cursor:pointer}
+button.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+button.ghost{color:var(--mute)}
+#add{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;margin-bottom:16px}
+#add label{display:flex;flex-direction:column;font-size:12px;color:var(--mute);gap:3px}
+#add button{align-self:end}
+.stats{color:var(--mute);margin-left:auto}
+.wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:820px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-size:12px;color:var(--mute);font-weight:600}
+tr:last-child td{border-bottom:0}
+td input[type=datetime-local],td select{width:100%}
+.name{font-weight:600;word-break:break-all}
+.note{color:var(--mute);font-size:13px}
+.s-done{border-left:4px solid var(--ok)}.s-run{border-left:4px solid var(--run)}.s-err{border-left:4px solid var(--err)}.s-todo{border-left:4px solid var(--line)}
+.late{color:var(--err);font-size:12px}
+.empty{padding:28px;text-align:center;color:var(--mute)}
+@media(max-width:720px){#add{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<h1>Источники для парсинга</h1>
+<p class="sub">Данные хранятся в этом браузере. Для переноса используйте экспорт и импорт.</p>
+
+<form id="add" onsubmit="return false">
+  <label>Источник (URL или название)<input id="n" placeholder="https://example.com/catalog"></label>
+  <label>Планируемое начало<input id="s" type="datetime-local"></label>
+  <label>Планируемое окончание<input id="e" type="datetime-local"></label>
+  <button class="primary" id="addBtn" type="button">Добавить</button>
+</form>
+
+<div class="bar">
+  <select id="f">
+    <option value="all">Все</option>
+    <option value="todo">Не спарсены</option>
+    <option value="run">В процессе</option>
+    <option value="done">Спарсены</option>
+    <option value="err">Ошибка</option>
+  </select>
+  <button id="exJson">Экспорт JSON</button>
+  <button id="exCsv">Экспорт CSV</button>
+  <button id="imp">Импорт JSON</button>
+  <input id="file" type="file" accept=".json" hidden>
+  <span class="stats" id="stats"></span>
+</div>
+
+<div class="wrap">
+<table>
+  <thead><tr><th>Источник</th><th style="width:150px">Статус</th><th style="width:200px">Начало</th><th style="width:200px">Окончание</th><th style="width:40px"></th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<div class="empty" id="empty" hidden>Список пуст. Добавьте первый источник выше.</div>
+</div>
+</main>
+
+<script>
+const KEY='parse-tracker-v1';
+const ST={todo:'Не спарсен',run:'В процессе',done:'Спарсен',err:'Ошибка'};
+let items=[];
+const $=id=>document.getElementById(id);
+
+function load(){try{items=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){items=[]}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(items))}catch(e){}}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+function render(){
+  const f=$('f').value;
+  const list=items.filter(i=>f==='all'||i.status===f);
+  $('empty').hidden=list.length>0;
+  const now=Date.now();
+  $('rows').innerHTML=list.map(i=>{
+    const late=i.status!=='done'&&i.end&&new Date(i.end).getTime()<now;
+    return `<tr class="s-${i.status}">
+      <td><div class="name">${esc(i.name)}</div>${late?'<div class="late">Плановое окончание прошло</div>':''}</td>
+      <td><select data-id="${i.id}" data-k="status">${Object.entries(ST).map(([k,v])=>`<option value="${k}"${k===i.status?' selected':''}>${v}</option>`).join('')}</select></td>
+      <td><input type="datetime-local" data-id="${i.id}" data-k="start" value="${i.start||''}"></td>
+      <td><input type="datetime-local" data-id="${i.id}" data-k="end" value="${i.end||''}"></td>
+      <td><button class="ghost" data-del="${i.id}" title="Удалить" aria-label="Удалить">✕</button></td>
+    </tr>`}).join('');
+  const c=k=>items.filter(i=>i.status===k).length;
+  $('stats').textContent=`Всего ${items.length} · спарсено ${c('done')} · в процессе ${c('run')} · ошибок ${c('err')}`;
+}
+
+$('addBtn').onclick=()=>{
+  const name=$('n').value.trim();
+  if(!name){$('n').focus();return}
+  items.push({id:Date.now()+Math.random().toString(36).slice(2,6),name,status:'todo',start:$('s').value,end:$('e').value});
+  $('n').value='';$('s').value='';$('e').value='';
+  save();render();$('n').focus();
+};
+$('n').addEventListener('keydown',e=>{if(e.key==='Enter')$('addBtn').click()});
+
+$('rows').addEventListener('change',e=>{
+  const t=e.target,it=items.find(i=>i.id===t.dataset.id);
+  if(!it)return;
+  it[t.dataset.k]=t.value;
+  save();render();
+});
+$('rows').addEventListener('click',e=>{
+  const id=e.target.dataset.del;
+  if(id&&confirm('Удалить источник?')){items=items.filter(i=>i.id!==id);save();render()}
+});
+$('f').onchange=render;
+
+function download(name,text,type){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([text],{type}));
+  a.download=name;a.click();URL.revokeObjectURL(a.href);
+}
+$('exJson').onclick=()=>download('parse-sources.json',JSON.stringify(items,null,2),'application/json');
+$('exCsv').onclick=()=>{
+  const q=s=>'"'+String(s||'').replace(/"/g,'""')+'"';
+  const rows=[['Источник','Статус','Начало','Окончание'].map(q).join(',')]
+    .concat(items.map(i=>[i.name,ST[i.status],i.start,i.end].map(q).join(',')));
+  download('parse-sources.csv','\ufeff'+rows.join('\n'),'text/csv');
+};
+$('imp').onclick=()=>$('file').click();
+$('file').onchange=e=>{
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const d=JSON.parse(r.result);
+      if(!Array.isArray(d))throw 0;
+      items=d.filter(i=>i&&i.name).map(i=>({id:i.id||Date.now()+Math.random().toString(36).slice(2,6),name:i.name,status:ST[i.status]?i.status:'todo',start:i.start||'',end:i.end||''}));
+      save();render();
+    }catch(_){alert('Не удалось прочитать файл. Нужен JSON, экспортированный из этой программы.')}
+  };
+  if(e.target.files[0])r.readAsText(e.target.files[0]);
+  e.target.value='';
+};
+
+load();render();
+</script>
+</body>
+</html>
